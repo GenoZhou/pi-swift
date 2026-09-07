@@ -45,7 +45,7 @@ Port changes using [docs/MAPPING.md](docs/MAPPING.md) and update [docs/PROGRESS.
 
 ## Build / test
 
-Requires Swift 6.0+.
+Requires Swift 6.0+, **macOS 15+** or **iOS 18+** (uses `Mutex` from Synchronization).
 
 ```bash
 swift build

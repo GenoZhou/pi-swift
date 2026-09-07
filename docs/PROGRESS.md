@@ -1,14 +1,15 @@
 # Port progress
 
 Upstream baseline: monorepo package version **0.85.1** (`@earendil-works/pi-agent-core` on `earendil-works/pi`).
+Synced against `upstream/main` @ `7d8ab31a` (2026-09-07).
 Update the "Upstream TS ref" when syncing via `git fetch upstream`.
 
 ## Layers
 
 | Layer | Scope | Status | Upstream TS ref |
 |-------|-------|--------|-----------------|
-| 0 | `PiAI` message/stream/validation subset | **Done (MVP)** | `packages/ai` @ 0.85.1 |
-| 1 | `Agent` + `agent-loop` + `stream-fn` + proxy | **Done (MVP)** | `packages/agent/src/{agent,agent-loop,types,stream-fn,proxy}.ts` |
+| 0 | `PiAI` message/stream/validation subset | **Done (MVP)** | `packages/ai` @ 0.85.1 / `7d8ab31a` |
+| 1 | `Agent` + `agent-loop` + `stream-fn` + proxy | **Done (MVP)** | `packages/agent/src/{agent,agent-loop,types,stream-fn,proxy}.ts` @ `7d8ab31a` |
 | 2 | iOS `ExecutionEnv` (Documents FS; no bash) | Not started | `harness/types.ts` `ExecutionEnv` |
 | 3 | Session memory + SQLite backend | Not started | `harness/session/*` |
 | 4 | Harness accept/drive/reducer | Not started | `harness/runtime/*` |
@@ -27,7 +28,7 @@ Update the "Upstream TS ref" when syncing via `git fetch upstream`.
 | `PiAgentCore.StreamFn` | Done | |
 | `PiAgentCore.AgentLoop` | Done | `promptWithoutTools`, `toolCallRoundTrip` |
 | `PiAgentCore.Agent` | Done | Same |
-| `PiAgentCore.Proxy` | Partial (SSE buffered on Linux; `/api/stream` + toolcall/thinking events; cancellable URLSessionTask) | `ProxyEventTests` |
+| `PiAgentCore.Proxy` | Partial (SSE buffered on Linux; `/api/stream` + toolcall/thinking; EOF without terminal → error #8997 via `consumeProxySSEPayload`; request options include sampling/cache/metadata/thinkingBudgets/headers in body only; cancellable URLSessionTask) | `ProxyEventTests` |
 
 ## Explicitly out of scope for Layer 1
 

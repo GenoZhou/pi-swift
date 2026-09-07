@@ -29,9 +29,12 @@ public struct ProxyStreamOptions: Sendable {
 	public var authToken: String
 	public var proxyUrl: String
 	public var temperature: Double?
+	public var samplingParams: [String: JSONValue]?
 	public var maxTokens: Int?
 	public var reasoning: ThinkingLevel?
+	public var cacheRetention: CacheRetention?
 	public var sessionId: String?
+	public var metadata: [String: JSONValue]?
 	public var transport: Transport?
 	public var thinkingBudgets: ThinkingBudgets?
 	public var maxRetryDelayMs: Double?
@@ -42,9 +45,12 @@ public struct ProxyStreamOptions: Sendable {
 		authToken: String,
 		proxyUrl: String,
 		temperature: Double? = nil,
+		samplingParams: [String: JSONValue]? = nil,
 		maxTokens: Int? = nil,
 		reasoning: ThinkingLevel? = nil,
+		cacheRetention: CacheRetention? = nil,
 		sessionId: String? = nil,
+		metadata: [String: JSONValue]? = nil,
 		transport: Transport? = nil,
 		thinkingBudgets: ThinkingBudgets? = nil,
 		maxRetryDelayMs: Double? = nil,
@@ -54,9 +60,12 @@ public struct ProxyStreamOptions: Sendable {
 		self.authToken = authToken
 		self.proxyUrl = proxyUrl
 		self.temperature = temperature
+		self.samplingParams = samplingParams
 		self.maxTokens = maxTokens
 		self.reasoning = reasoning
+		self.cacheRetention = cacheRetention
 		self.sessionId = sessionId
+		self.metadata = metadata
 		self.transport = transport
 		self.thinkingBudgets = thinkingBudgets
 		self.maxRetryDelayMs = maxRetryDelayMs
@@ -80,9 +89,12 @@ public func makeProxyStreamFn(
 				authToken: await authToken(),
 				proxyUrl: proxyUrl,
 				temperature: options?.temperature,
+				samplingParams: options?.samplingParams,
 				maxTokens: options?.maxTokens,
 				reasoning: options?.reasoning,
+				cacheRetention: options?.cacheRetention,
 				sessionId: options?.sessionId,
+				metadata: options?.metadata,
 				transport: options?.transport,
 				thinkingBudgets: options?.thinkingBudgets,
 				maxRetryDelayMs: options?.maxRetryDelayMs,
@@ -117,7 +129,6 @@ public func streamProxy(
 			stopReason: .pending
 		)
 		var toolPartialJson: [Int: String] = [:]
-		var sawTerminal = false
 		var cancelId: UUID?
 
 		do {
@@ -130,23 +141,12 @@ public func streamProxy(
 			request.httpMethod = "POST"
 			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 			request.setValue("Bearer \(options.authToken)", forHTTPHeaderField: "Authorization")
-			if let headers = options.headers {
-				for (key, value) in headers where key.lowercased() != "authorization" {
-					request.setValue(value, forHTTPHeaderField: key)
-				}
-			}
+			// Custom headers travel in the JSON body (upstream proxy protocol), not as HTTP hop headers.
 
 			let body = ProxyRequestBody(
 				model: model,
 				context: context,
-				options: ProxyRequestOptions(
-					temperature: options.temperature,
-					maxTokens: options.maxTokens,
-					reasoning: options.reasoning.flatMap { $0 == .off ? nil : $0.rawValue },
-					sessionId: options.sessionId,
-					transport: options.transport?.rawValue,
-					maxRetryDelayMs: options.maxRetryDelayMs
-				)
+				options: makeProxyRequestOptions(options)
 			)
 			request.httpBody = try JSONEncoder().encode(body)
 
@@ -169,30 +169,14 @@ public func streamProxy(
 
 			await stream.push(.start(partial: partial))
 
-			let decoder = JSONDecoder()
-			let text = String(decoding: data, as: UTF8.self)
-			for rawLine in text.split(whereSeparator: \.isNewline) {
-				if options.signal?.isCancelled == true {
-					throw CancellationError()
-				}
-				let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-				guard trimmed.hasPrefix("data:") else { continue }
-				let payload = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
-				if payload.isEmpty || payload == "[DONE]" { continue }
-				guard let eventData = payload.data(using: .utf8) else { continue }
-				let wire = try decoder.decode(ProxyWireEvent.self, from: eventData)
-				if let event = try processProxyEvent(wire, partial: &partial, toolPartialJson: &toolPartialJson) {
-					await stream.push(event)
-					if wire.isTerminal {
-						sawTerminal = true
-						break
-					}
-				}
-			}
-
-			if !sawTerminal {
-				partial.stopReason = .stop
-				await stream.push(.done(reason: .stop, message: partial))
+			let events = try consumeProxySSEPayload(
+				String(decoding: data, as: UTF8.self),
+				partial: &partial,
+				toolPartialJson: &toolPartialJson,
+				isCancelled: { options.signal?.isCancelled == true }
+			)
+			for event in events {
+				await stream.push(event)
 			}
 			await stream.end(partial)
 		} catch is CancellationError {
@@ -260,13 +244,77 @@ private func performDataRequest(
 	}
 }
 
-private struct ProxyRequestOptions: Encodable {
+struct ProxyRequestOptions: Encodable {
 	var temperature: Double?
+	var samplingParams: [String: JSONValue]?
 	var maxTokens: Int?
 	var reasoning: String?
+	var cacheRetention: String?
 	var sessionId: String?
+	var headers: [String: String]?
+	var metadata: [String: JSONValue]?
 	var transport: String?
+	var thinkingBudgets: ThinkingBudgets?
 	var maxRetryDelayMs: Double?
+}
+
+func makeProxyRequestOptions(_ options: ProxyStreamOptions) -> ProxyRequestOptions {
+	ProxyRequestOptions(
+		temperature: options.temperature,
+		samplingParams: options.samplingParams,
+		maxTokens: options.maxTokens,
+		reasoning: options.reasoning.flatMap { $0 == .off ? nil : $0.rawValue },
+		cacheRetention: options.cacheRetention?.rawValue,
+		sessionId: options.sessionId,
+		headers: options.headers,
+		metadata: options.metadata,
+		transport: options.transport?.rawValue,
+		thinkingBudgets: options.thinkingBudgets,
+		maxRetryDelayMs: options.maxRetryDelayMs
+	)
+}
+
+/// Parse proxy SSE lines and synthesize a missing-terminal error (upstream #8997).
+func consumeProxySSEPayload(
+	_ text: String,
+	partial: inout AssistantMessage,
+	toolPartialJson: inout [Int: String],
+	isCancelled: () -> Bool = { false }
+) throws -> [AssistantMessageEvent] {
+	var events: [AssistantMessageEvent] = []
+	var sawTerminal = false
+	let decoder = JSONDecoder()
+
+	for rawLine in text.split(whereSeparator: \.isNewline) {
+		if isCancelled() {
+			throw CancellationError()
+		}
+		let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard trimmed.hasPrefix("data:") else { continue }
+		let payload = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
+		if payload.isEmpty || payload == "[DONE]" { continue }
+		guard let eventData = payload.data(using: .utf8) else { continue }
+		let wire = try decoder.decode(ProxyWireEvent.self, from: eventData)
+		if let event = try processProxyEvent(wire, partial: &partial, toolPartialJson: &toolPartialJson) {
+			events.append(event)
+			if wire.isTerminal {
+				sawTerminal = true
+				break
+			}
+		}
+	}
+
+	if !sawTerminal {
+		events.append(applyMissingTerminalProxyError(to: &partial))
+	}
+	return events
+}
+
+/// Upstream `ebc374490` / #8997: synthesize an error when the proxy closes without a terminal event.
+func applyMissingTerminalProxyError(to partial: inout AssistantMessage) -> AssistantMessageEvent {
+	partial.stopReason = .error
+	partial.errorMessage = "Connection closed by proxy server before the response completed"
+	return .error(reason: .error, error: partial)
 }
 
 private struct ProxyRequestBody: Encodable {

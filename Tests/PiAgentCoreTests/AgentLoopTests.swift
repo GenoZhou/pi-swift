@@ -224,4 +224,91 @@ struct ProxyEventTests {
 		}
 		#expect(call.arguments["text"]?.stringValue == "hi")
 	}
+
+	@Test("missing terminal EOF synthesizes proxy connection error")
+	func missingTerminalEOF() {
+		var partial = AssistantMessage(
+			content: [.text(TextContent(text: "partial"))],
+			api: "t",
+			provider: "t",
+			model: "t",
+			stopReason: .pending
+		)
+		let event = applyMissingTerminalProxyError(to: &partial)
+		#expect(partial.stopReason == .error)
+		#expect(partial.errorMessage == "Connection closed by proxy server before the response completed")
+		guard case .error(let reason, let error) = event else {
+			Issue.record("expected error event")
+			return
+		}
+		#expect(reason == .error)
+		#expect(error.stopReason == .error)
+		#expect(error.errorMessage == partial.errorMessage)
+	}
+
+	@Test("SSE payload without done/error synthesizes missing-terminal error")
+	func consumeSSEWithoutTerminal() throws {
+		var partial = AssistantMessage(api: "t", provider: "t", model: "t", stopReason: .pending)
+		var json: [Int: String] = [:]
+		let sse = """
+		data: {"type":"text_start","contentIndex":0}
+		data: {"type":"text_delta","contentIndex":0,"delta":"hi"}
+		"""
+		let events = try consumeProxySSEPayload(sse, partial: &partial, toolPartialJson: &json)
+		#expect(events.count == 3)
+		guard case .error(let reason, let error) = events.last else {
+			Issue.record("expected trailing error event")
+			return
+		}
+		#expect(reason == .error)
+		#expect(error.stopReason == .error)
+		#expect(error.errorMessage == "Connection closed by proxy server before the response completed")
+		#expect(partial.stopReason == .error)
+	}
+
+	@Test("SSE payload with done does not synthesize missing-terminal error")
+	func consumeSSEWithTerminal() throws {
+		var partial = AssistantMessage(api: "t", provider: "t", model: "t", stopReason: .pending)
+		var json: [Int: String] = [:]
+		let sse = """
+		data: {"type":"text_start","contentIndex":0}
+		data: {"type":"done","reason":"stop","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}}
+		"""
+		let events = try consumeProxySSEPayload(sse, partial: &partial, toolPartialJson: &json)
+		#expect(events.count == 2)
+		guard case .done(let reason, _) = events.last else {
+			Issue.record("expected done event")
+			return
+		}
+		#expect(reason == .stop)
+		#expect(partial.stopReason == .stop)
+	}
+
+	@Test("proxy request options encode sampling cache metadata headers and thinkingBudgets")
+	func requestOptionsEncoding() throws {
+		let options = makeProxyRequestOptions(
+			ProxyStreamOptions(
+				authToken: "tok",
+				proxyUrl: "https://proxy.example",
+				temperature: 0.2,
+				samplingParams: ["top_p": .number(0.9)],
+				maxTokens: 128,
+				cacheRetention: .long,
+				sessionId: "s1",
+				metadata: ["user_id": .string("u1")],
+				thinkingBudgets: ThinkingBudgets(high: 2048),
+				headers: ["X-Trace": "abc"]
+			)
+		)
+		let data = try JSONEncoder().encode(options)
+		let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+		#expect(object?["temperature"] as? Double == 0.2)
+		#expect(object?["maxTokens"] as? Int == 128)
+		#expect(object?["cacheRetention"] as? String == "long")
+		#expect(object?["sessionId"] as? String == "s1")
+		#expect((object?["headers"] as? [String: String])?["X-Trace"] == "abc")
+		#expect((object?["samplingParams"] as? [String: Any])?["top_p"] as? Double == 0.9)
+		#expect((object?["metadata"] as? [String: Any])?["user_id"] as? String == "u1")
+		#expect((object?["thinkingBudgets"] as? [String: Any])?["high"] as? Int == 2048)
+	}
 }

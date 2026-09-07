@@ -214,11 +214,17 @@ public struct AgentLoopTurnUpdate: Sendable {
 
 public struct AgentLoopConfig: Sendable {
 	public var model: Model
+	public var temperature: Double?
+	public var samplingParams: [String: JSONValue]?
+	public var maxTokens: Int?
 	public var reasoning: ThinkingLevel?
+	public var cacheRetention: CacheRetention?
 	public var sessionId: String?
+	public var metadata: [String: JSONValue]?
 	public var transport: Transport?
 	public var thinkingBudgets: ThinkingBudgets?
 	public var maxRetryDelayMs: Double?
+	public var headers: [String: String?]?
 	public var apiKey: String?
 	public var toolExecution: ToolExecutionMode?
 	public var onPayload: (@Sendable (JSONValue, Model) async -> JSONValue?)?
@@ -236,11 +242,17 @@ public struct AgentLoopConfig: Sendable {
 
 	public init(
 		model: Model,
+		temperature: Double? = nil,
+		samplingParams: [String: JSONValue]? = nil,
+		maxTokens: Int? = nil,
 		reasoning: ThinkingLevel? = nil,
+		cacheRetention: CacheRetention? = nil,
 		sessionId: String? = nil,
+		metadata: [String: JSONValue]? = nil,
 		transport: Transport? = nil,
 		thinkingBudgets: ThinkingBudgets? = nil,
 		maxRetryDelayMs: Double? = nil,
+		headers: [String: String?]? = nil,
 		apiKey: String? = nil,
 		toolExecution: ToolExecutionMode? = nil,
 		onPayload: (@Sendable (JSONValue, Model) async -> JSONValue?)? = nil,
@@ -256,11 +268,17 @@ public struct AgentLoopConfig: Sendable {
 		afterToolCall: (@Sendable (AfterToolCallContext, CancellationToken?) async -> AfterToolCallResult?)? = nil
 	) {
 		self.model = model
+		self.temperature = temperature
+		self.samplingParams = samplingParams
+		self.maxTokens = maxTokens
 		self.reasoning = reasoning
+		self.cacheRetention = cacheRetention
 		self.sessionId = sessionId
+		self.metadata = metadata
 		self.transport = transport
 		self.thinkingBudgets = thinkingBudgets
 		self.maxRetryDelayMs = maxRetryDelayMs
+		self.headers = headers
 		self.apiKey = apiKey
 		self.toolExecution = toolExecution
 		self.onPayload = onPayload

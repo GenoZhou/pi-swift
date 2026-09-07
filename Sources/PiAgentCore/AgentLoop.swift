@@ -279,11 +279,17 @@ private func streamAssistantResponse(
 	let options = SimpleStreamOptions(
 		signal: signal,
 		apiKey: resolvedApiKey,
+		temperature: config.temperature,
+		samplingParams: config.samplingParams,
+		maxTokens: config.maxTokens,
 		reasoning: config.reasoning,
+		cacheRetention: config.cacheRetention,
 		sessionId: config.sessionId,
+		metadata: config.metadata,
 		transport: config.transport,
 		thinkingBudgets: config.thinkingBudgets,
 		maxRetryDelayMs: config.maxRetryDelayMs,
+		headers: config.headers,
 		onPayload: config.onPayload,
 		onResponse: config.onResponse
 	)

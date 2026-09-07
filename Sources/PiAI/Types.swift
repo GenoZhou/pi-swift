@@ -515,6 +515,12 @@ public enum Transport: String, Sendable, Hashable, Codable {
 	case auto
 }
 
+public enum CacheRetention: String, Sendable, Hashable, Codable {
+	case none
+	case short
+	case long
+}
+
 public struct ThinkingBudgets: Sendable, Hashable, Codable {
 	public var minimal: Int?
 	public var low: Int?
@@ -544,9 +550,12 @@ public struct SimpleStreamOptions: Sendable {
 	public var signal: CancellationToken?
 	public var apiKey: String?
 	public var temperature: Double?
+	public var samplingParams: [String: JSONValue]?
 	public var maxTokens: Int?
 	public var reasoning: ThinkingLevel?
+	public var cacheRetention: CacheRetention?
 	public var sessionId: String?
+	public var metadata: [String: JSONValue]?
 	public var transport: Transport?
 	public var thinkingBudgets: ThinkingBudgets?
 	public var maxRetryDelayMs: Double?
@@ -558,9 +567,12 @@ public struct SimpleStreamOptions: Sendable {
 		signal: CancellationToken? = nil,
 		apiKey: String? = nil,
 		temperature: Double? = nil,
+		samplingParams: [String: JSONValue]? = nil,
 		maxTokens: Int? = nil,
 		reasoning: ThinkingLevel? = nil,
+		cacheRetention: CacheRetention? = nil,
 		sessionId: String? = nil,
+		metadata: [String: JSONValue]? = nil,
 		transport: Transport? = nil,
 		thinkingBudgets: ThinkingBudgets? = nil,
 		maxRetryDelayMs: Double? = nil,
@@ -571,9 +583,12 @@ public struct SimpleStreamOptions: Sendable {
 		self.signal = signal
 		self.apiKey = apiKey
 		self.temperature = temperature
+		self.samplingParams = samplingParams
 		self.maxTokens = maxTokens
 		self.reasoning = reasoning
+		self.cacheRetention = cacheRetention
 		self.sessionId = sessionId
+		self.metadata = metadata
 		self.transport = transport
 		self.thinkingBudgets = thinkingBudgets
 		self.maxRetryDelayMs = maxRetryDelayMs

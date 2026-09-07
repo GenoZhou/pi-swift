@@ -17,10 +17,16 @@ public struct AgentOptions: Sendable {
 	public var prepareNextTurnWithContext: (@Sendable (PrepareNextTurnContext, CancellationToken?) async -> AgentLoopTurnUpdate?)?
 	public var steeringMode: QueueMode
 	public var followUpMode: QueueMode
+	public var temperature: Double?
+	public var samplingParams: [String: JSONValue]?
+	public var maxTokens: Int?
+	public var cacheRetention: CacheRetention?
 	public var sessionId: String?
+	public var metadata: [String: JSONValue]?
 	public var thinkingBudgets: ThinkingBudgets?
 	public var transport: Transport
 	public var maxRetryDelayMs: Double?
+	public var headers: [String: String?]?
 	public var toolExecution: ToolExecutionMode
 
 	public init(
@@ -38,10 +44,16 @@ public struct AgentOptions: Sendable {
 		prepareNextTurnWithContext: (@Sendable (PrepareNextTurnContext, CancellationToken?) async -> AgentLoopTurnUpdate?)? = nil,
 		steeringMode: QueueMode = .oneAtATime,
 		followUpMode: QueueMode = .oneAtATime,
+		temperature: Double? = nil,
+		samplingParams: [String: JSONValue]? = nil,
+		maxTokens: Int? = nil,
+		cacheRetention: CacheRetention? = nil,
 		sessionId: String? = nil,
+		metadata: [String: JSONValue]? = nil,
 		thinkingBudgets: ThinkingBudgets? = nil,
 		transport: Transport = .auto,
 		maxRetryDelayMs: Double? = nil,
+		headers: [String: String?]? = nil,
 		toolExecution: ToolExecutionMode = .parallel
 	) {
 		self.initialState = initialState
@@ -58,10 +70,16 @@ public struct AgentOptions: Sendable {
 		self.prepareNextTurnWithContext = prepareNextTurnWithContext
 		self.steeringMode = steeringMode
 		self.followUpMode = followUpMode
+		self.temperature = temperature
+		self.samplingParams = samplingParams
+		self.maxTokens = maxTokens
+		self.cacheRetention = cacheRetention
 		self.sessionId = sessionId
+		self.metadata = metadata
 		self.thinkingBudgets = thinkingBudgets
 		self.transport = transport
 		self.maxRetryDelayMs = maxRetryDelayMs
+		self.headers = headers
 		self.toolExecution = toolExecution
 	}
 }
@@ -174,10 +192,16 @@ public final class Agent: Sendable {
 		var shouldStopAfterTurn: (@Sendable (ShouldStopAfterTurnContext, CancellationToken?) async -> Bool)?
 		var prepareNextTurn: (@Sendable (CancellationToken?) async -> AgentLoopTurnUpdate?)?
 		var prepareNextTurnWithContext: (@Sendable (PrepareNextTurnContext, CancellationToken?) async -> AgentLoopTurnUpdate?)?
+		var temperature: Double?
+		var samplingParams: [String: JSONValue]?
+		var maxTokens: Int?
+		var cacheRetention: CacheRetention?
 		var sessionId: String?
+		var metadata: [String: JSONValue]?
 		var thinkingBudgets: ThinkingBudgets?
 		var transport: Transport
 		var maxRetryDelayMs: Double?
+		var headers: [String: String?]?
 		var toolExecution: ToolExecutionMode
 	}
 
@@ -200,10 +224,16 @@ public final class Agent: Sendable {
 				shouldStopAfterTurn: options.shouldStopAfterTurn,
 				prepareNextTurn: options.prepareNextTurn,
 				prepareNextTurnWithContext: options.prepareNextTurnWithContext,
+				temperature: options.temperature,
+				samplingParams: options.samplingParams,
+				maxTokens: options.maxTokens,
+				cacheRetention: options.cacheRetention,
 				sessionId: options.sessionId,
+				metadata: options.metadata,
 				thinkingBudgets: options.thinkingBudgets,
 				transport: options.transport,
 				maxRetryDelayMs: options.maxRetryDelayMs,
+				headers: options.headers,
 				toolExecution: options.toolExecution
 			)
 		)
@@ -438,11 +468,17 @@ public final class Agent: Sendable {
 
 		return AgentLoopConfig(
 			model: state.model,
+			temperature: h.temperature,
+			samplingParams: h.samplingParams,
+			maxTokens: h.maxTokens,
 			reasoning: state.thinkingLevel == .off ? nil : state.thinkingLevel,
+			cacheRetention: h.cacheRetention,
 			sessionId: h.sessionId,
+			metadata: h.metadata,
 			transport: h.transport,
 			thinkingBudgets: h.thinkingBudgets,
 			maxRetryDelayMs: h.maxRetryDelayMs,
+			headers: h.headers,
 			toolExecution: h.toolExecution,
 			onPayload: h.onPayload,
 			onResponse: h.onResponse,

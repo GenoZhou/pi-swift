@@ -2,7 +2,7 @@
 
 Swift Package Manager port of [`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi/tree/main/packages/agent) for iOS / macOS AI-native apps.
 
-This repository (`GenoZhou/pi-swift`) is a **Swift-only fork**. The git root is the SPM package root (`Package.swift`), so host apps can depend on it via submodule or SPM without a subdirectory path.
+This repository is a **standalone Swift package** (not a GitHub fork of the TypeScript monorepo). The git root is the SPM package root (`Package.swift`), so host apps can depend on it via submodule or SPM without a subdirectory path.
 
 ## Products
 

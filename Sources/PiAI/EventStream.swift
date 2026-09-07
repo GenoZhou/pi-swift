@@ -1,8 +1,9 @@
 import Foundation
 
-/// Async event stream matching `packages/ai/src/utils/event-stream.ts`.
+/// Async event stream matching upstream `packages/ai/src/utils/event-stream.ts`.
 public actor EventStream<Event: Sendable, Result: Sendable> {
 	private var queue: [Event] = []
+	private var queueHead = 0
 	private var waiters: [CheckedContinuation<Event?, Never>] = []
 	private var done = false
 	private var finalResult: Result?
@@ -87,8 +88,14 @@ public actor EventStream<Event: Sendable, Result: Sendable> {
 	}
 
 	private func nextEvent() async -> Event? {
-		if !queue.isEmpty {
-			return queue.removeFirst()
+		if queueHead < queue.count {
+			let event = queue[queueHead]
+			queueHead += 1
+			if queueHead > 32, queueHead * 2 >= queue.count {
+				queue.removeFirst(queueHead)
+				queueHead = 0
+			}
+			return event
 		}
 		if done {
 			return nil
@@ -99,6 +106,10 @@ public actor EventStream<Event: Sendable, Result: Sendable> {
 	}
 }
 
+/// Ordered wrapper over ``EventStream`` for assistant protocol events.
+///
+/// `push`/`end` are async and await the actor so producers cannot reorder events
+/// (unlike fire-and-forget `Task`s).
 public final class AssistantMessageEventStream: @unchecked Sendable {
 	private let stream: EventStream<AssistantMessageEvent, AssistantMessage>
 
@@ -119,18 +130,18 @@ public final class AssistantMessageEventStream: @unchecked Sendable {
 				case .error(_, let error):
 					return error
 				default:
-					fatalError("Unexpected event type for final result")
+					preconditionFailure("Unexpected event type for final result")
 				}
 			}
 		)
 	}
 
-	public func push(_ event: AssistantMessageEvent) {
-		Task { await stream.push(event) }
+	public func push(_ event: AssistantMessageEvent) async {
+		await stream.push(event)
 	}
 
-	public func end(_ message: AssistantMessage? = nil) {
-		Task { await stream.end(message) }
+	public func end(_ message: AssistantMessage? = nil) async {
+		await stream.end(message)
 	}
 
 	public var events: AsyncStream<AssistantMessageEvent> {
@@ -140,8 +151,4 @@ public final class AssistantMessageEventStream: @unchecked Sendable {
 	public func result() async -> AssistantMessage {
 		await stream.result()
 	}
-}
-
-public func createAssistantMessageEventStream() -> AssistantMessageEventStream {
-	AssistantMessageEventStream()
 }

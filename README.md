@@ -62,7 +62,7 @@ let model = Model(id: "gpt-…", name: "…", api: "openai-responses", provider:
 let agent = Agent(
   options: AgentOptions(
     initialState: AgentState(systemPrompt: "You are helpful.", model: model),
-    streamFn: makeProxyStreamFn(proxyUrl: "https://api.example.com", authToken: token)
+    streamFn: makeProxyStreamFn(proxyUrl: "https://api.example.com", authToken: { token })
   )
 )
 

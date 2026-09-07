@@ -1,6 +1,6 @@
 import Foundation
 import PiAI
-import PiAgentCore
+@testable import PiAgentCore
 import Testing
 
 private final class StringListBox: @unchecked Sendable {
@@ -44,11 +44,12 @@ struct AgentLoopTests {
 					model: model.id,
 					stopReason: .pending
 				)
-				stream.push(.start(partial: partial))
+				await stream.push(.start(partial: partial))
 				partial.content = [.text(TextContent(text: "hello"))]
-				stream.push(.textDelta(contentIndex: 0, delta: "hello", partial: partial))
+				await stream.push(.textDelta(contentIndex: 0, delta: "hello", partial: partial))
 				partial.stopReason = .stop
-				stream.push(.done(reason: .stop, message: partial))
+				await stream.push(.done(reason: .stop, message: partial))
+				await stream.end(partial)
 			}
 			return stream
 		}
@@ -119,8 +120,9 @@ struct AgentLoopTests {
 						model: model.id,
 						stopReason: .toolUse
 					)
-					stream.push(.start(partial: partial))
-					stream.push(.done(reason: .toolUse, message: partial))
+					await stream.push(.start(partial: partial))
+					await stream.push(.done(reason: .toolUse, message: partial))
+					await stream.end(partial)
 				} else {
 					let partial = AssistantMessage(
 						content: [.text(TextContent(text: "done"))],
@@ -129,8 +131,9 @@ struct AgentLoopTests {
 						model: model.id,
 						stopReason: .stop
 					)
-					stream.push(.start(partial: partial))
-					stream.push(.done(reason: .stop, message: partial))
+					await stream.push(.start(partial: partial))
+					await stream.push(.done(reason: .stop, message: partial))
+					await stream.end(partial)
 				}
 			}
 			return stream
@@ -163,6 +166,18 @@ struct AgentLoopTests {
 			Issue.record("Expected toolResult message")
 		}
 	}
+
+	@Test("continue without messages throws")
+	func continueRequiresMessages() async {
+		let agent = Agent(
+			options: AgentOptions(
+				streamFn: { _, _, _ in AssistantMessageEventStream() }
+			)
+		)
+		await #expect(throws: AgentError.self) {
+			try await agent.continue()
+		}
+	}
 }
 
 @Suite("Validation")
@@ -183,5 +198,30 @@ struct ValidationTests {
 				toolCall: ToolCall(id: "1", name: "echo", arguments: [:])
 			)
 		}
+	}
+}
+
+@Suite("Proxy event processing")
+struct ProxyEventTests {
+	@Test("toolcall delta accumulates arguments")
+	func toolcallDelta() throws {
+		var partial = AssistantMessage(api: "t", provider: "t", model: "t", stopReason: .pending)
+		var json: [Int: String] = [:]
+
+		_ = try processProxyEvent(
+			ProxyWireEvent(type: "toolcall_start", contentIndex: 0, id: "c1", toolName: "echo"),
+			partial: &partial,
+			toolPartialJson: &json
+		)
+		_ = try processProxyEvent(
+			ProxyWireEvent(type: "toolcall_delta", contentIndex: 0, delta: #"{"text":"hi"}"#),
+			partial: &partial,
+			toolPartialJson: &json
+		)
+		guard case .toolCall(let call) = partial.content[0] else {
+			Issue.record("expected tool call")
+			return
+		}
+		#expect(call.arguments["text"]?.stringValue == "hi")
 	}
 }

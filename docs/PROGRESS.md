@@ -27,7 +27,7 @@ Update the "Upstream TS ref" when syncing via `git fetch upstream`.
 | `PiAgentCore.StreamFn` | Done | |
 | `PiAgentCore.AgentLoop` | Done | `promptWithoutTools`, `toolCallRoundTrip` |
 | `PiAgentCore.Agent` | Done | Same |
-| `PiAgentCore.Proxy` | Partial (basic SSE `data:` lines) | Integration deferred |
+| `PiAgentCore.Proxy` | Partial (SSE buffered on Linux; `/api/stream` + toolcall/thinking events; cancellable URLSessionTask) | `ProxyEventTests` |
 
 ## Explicitly out of scope for Layer 1
 

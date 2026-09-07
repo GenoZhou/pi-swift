@@ -154,7 +154,7 @@ private struct ActiveRun: Sendable {
 public final class Agent: Sendable {
 	public let state: AgentState
 	private struct ListenerState {
-		var listeners: [@Sendable (AgentEvent, CancellationToken) async -> Void] = []
+		var listeners: [UUID: @Sendable (AgentEvent, CancellationToken) async -> Void] = [:]
 	}
 
 	private let listeners = Mutex(ListenerState())
@@ -188,7 +188,7 @@ public final class Agent: Sendable {
 		hooks = Mutex(
 			Hooks(
 				convertToLlm: options.convertToLlm ?? { messages in
-					messages.compactMap(\.asMessage)
+					messages.map(\.asMessage)
 				},
 				transformContext: options.transformContext,
 				streamFunction: options.streamFn,
@@ -235,15 +235,13 @@ public final class Agent: Sendable {
 	public func subscribe(
 		_ listener: @escaping @Sendable (AgentEvent, CancellationToken) async -> Void
 	) -> @Sendable () -> Void {
-		let id = listeners.withLock { state -> Int in
-			state.listeners.append(listener)
-			return state.listeners.count - 1
+		let id = UUID()
+		listeners.withLock { state in
+			state.listeners[id] = listener
 		}
 		return {
 			self.listeners.withLock { state in
-				if id < state.listeners.count {
-					state.listeners[id] = { _, _ in }
-				}
+				state.listeners[id] = nil
 			}
 		}
 	}
@@ -362,7 +360,7 @@ public final class Agent: Sendable {
 		skipInitialSteeringPoll: Bool = false
 	) async {
 		await runWithLifecycle { signal in
-			_ = await runAgentLoop(
+			_ = try await runAgentLoop(
 				prompts: messages,
 				context: self.createContextSnapshot(),
 				config: self.createLoopConfig(skipInitialSteeringPoll: skipInitialSteeringPoll),
@@ -377,7 +375,7 @@ public final class Agent: Sendable {
 
 	private func runContinuation() async {
 		await runWithLifecycle { signal in
-			_ = await runAgentLoopContinue(
+			_ = try await runAgentLoopContinue(
 				context: self.createContextSnapshot(),
 				config: self.createLoopConfig(),
 				emit: { event in
@@ -460,7 +458,7 @@ public final class Agent: Sendable {
 		)
 	}
 
-	private func runWithLifecycle(_ executor: (CancellationToken) async -> Void) async {
+	private func runWithLifecycle(_ executor: (CancellationToken) async throws -> Void) async {
 		let abortController = CancellationController()
 		let idle = IdleBox()
 		activeRun.withLock { $0 = ActiveRun(idle: idle, abortController: abortController) }
@@ -469,13 +467,33 @@ public final class Agent: Sendable {
 		state.streamingMessage = nil
 		state.errorMessage = nil
 
-		await executor(abortController.token)
+		do {
+			try await executor(abortController.token)
+		} catch {
+			await handleRunFailure(error, aborted: abortController.token.isCancelled)
+		}
 
 		state.isStreaming = false
 		state.streamingMessage = nil
 		state.pendingToolCalls = []
 		activeRun.withLock { $0 = nil }
 		idle.resume()
+	}
+
+	private func handleRunFailure(_ error: Error, aborted: Bool) async {
+		let failureMessage = AssistantMessage(
+			content: [.text(TextContent(text: ""))],
+			api: state.model.api,
+			provider: state.model.provider,
+			model: state.model.id,
+			usage: .empty,
+			stopReason: aborted ? .aborted : .error,
+			errorMessage: error.localizedDescription
+		)
+		await processEvents(.messageStart(message: .assistant(failureMessage)))
+		await processEvents(.messageEnd(message: .assistant(failureMessage)))
+		await processEvents(.turnEnd(message: .assistant(failureMessage), toolResults: []))
+		await processEvents(.agentEnd(messages: [.assistant(failureMessage)]))
 	}
 
 	private func processEvents(_ event: AgentEvent) async {
@@ -509,9 +527,10 @@ public final class Agent: Sendable {
 		}
 
 		guard let signal = signal else {
-			fatalError("Agent listener invoked outside active run")
+			assertionFailure("Agent listener invoked outside active run")
+			return
 		}
-		let currentListeners = listeners.withLock(\.listeners)
+		let currentListeners = Array(listeners.withLock(\.listeners.values))
 		for listener in currentListeners {
 			await listener(event, signal)
 		}
@@ -522,6 +541,8 @@ public enum AgentError: Error, LocalizedError, Sendable {
 	case alreadyProcessing
 	case noMessagesToContinue
 	case cannotContinueFromAssistant
+	case noDefaultStreamFn
+	case listenerOutsideActiveRun
 
 	public var errorDescription: String? {
 		switch self {
@@ -531,6 +552,10 @@ public enum AgentError: Error, LocalizedError, Sendable {
 			return "No messages to continue from"
 		case .cannotContinueFromAssistant:
 			return "Cannot continue from message role: assistant"
+		case .noDefaultStreamFn:
+			return "No default stream function configured. Pass streamFn explicitly or call setDefaultStreamFn()."
+		case .listenerOutsideActiveRun:
+			return "Agent listener invoked outside active run"
 		}
 	}
 }

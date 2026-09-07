@@ -143,7 +143,7 @@ public enum AgentMessage: Sendable, Hashable {
 		}
 	}
 
-	public var asMessage: Message? {
+	public var asMessage: Message {
 		switch self {
 		case .llm(let message):
 			return message

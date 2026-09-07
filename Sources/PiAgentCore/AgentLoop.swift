@@ -11,21 +11,16 @@ public func agentLoop(
 	signal: CancellationToken?,
 	streamFn: @escaping StreamFn
 ) -> EventStream<AgentEvent, [AgentMessage]> {
-	let stream = createAgentStream()
-	Task {
-		let messages = await runAgentLoop(
+	startAgentStream { emit in
+		try await runAgentLoop(
 			prompts: prompts,
 			context: context,
 			config: config,
-			emit: { event in
-				await stream.push(event)
-			},
+			emit: emit,
 			signal: signal,
 			streamFn: streamFn
 		)
-		await stream.end(messages)
 	}
-	return stream
 }
 
 public func agentLoopContinue(
@@ -33,28 +28,17 @@ public func agentLoopContinue(
 	config: AgentLoopConfig,
 	signal: CancellationToken?,
 	streamFn: @escaping StreamFn
-) -> EventStream<AgentEvent, [AgentMessage]> {
-	guard !context.messages.isEmpty else {
-		fatalError("Cannot continue: no messages in context")
-	}
-	guard context.messages.last?.role != "assistant" else {
-		fatalError("Cannot continue from message role: assistant")
-	}
-
-	let stream = createAgentStream()
-	Task {
-		let messages = await runAgentLoopContinue(
+) throws -> EventStream<AgentEvent, [AgentMessage]> {
+	try assertCanContinue(context)
+	return startAgentStream { emit in
+		try await runAgentLoopContinue(
 			context: context,
 			config: config,
-			emit: { event in
-				await stream.push(event)
-			},
+			emit: emit,
 			signal: signal,
 			streamFn: streamFn
 		)
-		await stream.end(messages)
 	}
-	return stream
 }
 
 public func runAgentLoop(
@@ -64,7 +48,7 @@ public func runAgentLoop(
 	emit: @escaping AgentEventSink,
 	signal: CancellationToken?,
 	streamFn: StreamFn?
-) async -> [AgentMessage] {
+) async throws -> [AgentMessage] {
 	var newMessages = prompts
 	var currentContext = AgentContext(
 		systemPrompt: context.systemPrompt,
@@ -85,7 +69,7 @@ public func runAgentLoop(
 		config: config,
 		signal: signal,
 		emit: emit,
-		streamFunction: streamFn ?? getDefaultStreamFn()
+		streamFunction: try streamFn ?? getDefaultStreamFn()
 	)
 	return newMessages
 }
@@ -96,13 +80,8 @@ public func runAgentLoopContinue(
 	emit: @escaping AgentEventSink,
 	signal: CancellationToken?,
 	streamFn: StreamFn?
-) async -> [AgentMessage] {
-	guard !context.messages.isEmpty else {
-		fatalError("Cannot continue: no messages in context")
-	}
-	guard context.messages.last?.role != "assistant" else {
-		fatalError("Cannot continue from message role: assistant")
-	}
+) async throws -> [AgentMessage] {
+	try assertCanContinue(context)
 
 	var newMessages: [AgentMessage] = []
 	var currentContext = context
@@ -116,9 +95,35 @@ public func runAgentLoopContinue(
 		config: config,
 		signal: signal,
 		emit: emit,
-		streamFunction: streamFn ?? getDefaultStreamFn()
+		streamFunction: try streamFn ?? getDefaultStreamFn()
 	)
 	return newMessages
+}
+
+private func assertCanContinue(_ context: AgentContext) throws {
+	guard !context.messages.isEmpty else {
+		throw AgentError.noMessagesToContinue
+	}
+	guard context.messages.last?.role != "assistant" else {
+		throw AgentError.cannotContinueFromAssistant
+	}
+}
+
+private func startAgentStream(
+	_ work: @escaping @Sendable (@escaping AgentEventSink) async throws -> [AgentMessage]
+) -> EventStream<AgentEvent, [AgentMessage]> {
+	let stream = createAgentStream()
+	Task {
+		do {
+			let messages = try await work { event in
+				await stream.push(event)
+			}
+			await stream.end(messages)
+		} catch {
+			await stream.end([])
+		}
+	}
+	return stream
 }
 
 private func createAgentStream() -> EventStream<AgentEvent, [AgentMessage]> {
@@ -302,18 +307,29 @@ private func streamAssistantResponse(
 			}
 
 		case .done, .error:
-			let finalMessage = await response.result()
-			if addedPartial {
-				context.messages[context.messages.count - 1] = .assistant(finalMessage)
-			} else {
-				context.messages.append(.assistant(finalMessage))
-				await emit(.messageStart(message: .assistant(finalMessage)))
-			}
-			await emit(.messageEnd(message: .assistant(finalMessage)))
-			return finalMessage
+			return await commitFinalAssistant(
+				response: response,
+				context: &context,
+				emit: emit,
+				addedPartial: addedPartial
+			)
 		}
 	}
 
+	return await commitFinalAssistant(
+		response: response,
+		context: &context,
+		emit: emit,
+		addedPartial: addedPartial
+	)
+}
+
+private func commitFinalAssistant(
+	response: AssistantMessageEventStream,
+	context: inout AgentContext,
+	emit: AgentEventSink,
+	addedPartial: Bool
+) async -> AssistantMessage {
 	let finalMessage = await response.result()
 	if addedPartial {
 		context.messages[context.messages.count - 1] = .assistant(finalMessage)

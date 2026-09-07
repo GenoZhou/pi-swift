@@ -2,20 +2,16 @@ import Foundation
 import Synchronization
 import PiAI
 
-private struct DefaultStreamFnBox: Sendable {
-	var value: StreamFn?
-}
-
-private let defaultStreamFn = Mutex(DefaultStreamFnBox())
+private let defaultStreamFn = Mutex<StreamFn?>(nil)
 
 /// Configure the fallback used when callers omit `streamFn`.
 public func setDefaultStreamFn(_ streamFn: StreamFn?) {
-	defaultStreamFn.withLock { $0.value = streamFn }
+	defaultStreamFn.withLock { $0 = streamFn }
 }
 
-public func getDefaultStreamFn() -> StreamFn {
-	guard let value = defaultStreamFn.withLock(\.value) else {
-		fatalError("No default stream function configured. Pass streamFn explicitly or call setDefaultStreamFn().")
+public func getDefaultStreamFn() throws -> StreamFn {
+	guard let value = defaultStreamFn.withLock({ $0 }) else {
+		throw AgentError.noDefaultStreamFn
 	}
 	return value
 }

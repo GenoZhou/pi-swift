@@ -24,6 +24,10 @@ packages/ai/src/providers/.model-generation-*/
 *.swo
 *~
 
+# Swift Package Manager
+swift/.build/
+swift/.swiftpm/
+
 # Package specific
 .npm/
 coverage/
